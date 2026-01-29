@@ -48,6 +48,7 @@ interface VisualNodeRendererProps {
 
 export const VisualNodeRenderer: React.FC<VisualNodeRendererProps> = ({ node, selectedId, onSelect, depth = 0, isRoot = false, onDeleteComment }) => {
     const [showComments, setShowComments] = useState(false);
+    const [expanded, setExpanded] = useState(true); // Default expanded in editor
     const hasChildren = node.children && node.children.length > 0;
     const isSelected = selectedId === node.id;
     const hasComments = node.comments && node.comments.length > 0;
@@ -129,6 +130,21 @@ export const VisualNodeRenderer: React.FC<VisualNodeRendererProps> = ({ node, se
                             </div>
                         </div>
                     )}
+
+                    {/* EXPAND/COLLAPSE TOGGLE */}
+                    {hasChildren && (
+                        <div 
+                            onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+                            className={`
+                                absolute -right-3 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full 
+                                bg-[#121212] border border-white/30 flex items-center justify-center 
+                                text-[10px] shadow-lg transition-transform z-30 hover:bg-white/20 hover:scale-110 cursor-pointer
+                            `}
+                            title={expanded ? "Recolher" : "Expandir"}
+                        >
+                            {expanded ? <span className="font-bold text-white text-[10px]">-</span> : <span className="font-bold text-white text-[10px]">+</span>}
+                        </div>
+                    )}
                 </div>
 
                 {/* Expanded Post-Its */}
@@ -155,7 +171,7 @@ export const VisualNodeRenderer: React.FC<VisualNodeRendererProps> = ({ node, se
                 )}
             </div>
 
-            {hasChildren && (
+            {expanded && hasChildren && (
                 <div className="flex items-center animate-fade-in">
                     <div className="w-8 h-0.5 bg-gray-600/50"></div>
                     <div className="flex flex-col relative">
@@ -540,7 +556,10 @@ export const VisualMindMapModal: React.FC<VisualMindMapModalProps> = ({ rootNode
             </div>
 
             {selectedNode && (
-                <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2 animate-slide-up">
+                <div 
+                    className="absolute top-20 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2 animate-slide-up"
+                    onMouseDown={(e) => e.stopPropagation()} 
+                >
                     <div className="bg-[#1A1A1A] border border-white/20 p-4 rounded-xl shadow-2xl flex flex-col gap-3 min-w-[340px] relative">
                         {/* Header */}
                         <div className="flex justify-between items-center border-b border-white/10 pb-2">
