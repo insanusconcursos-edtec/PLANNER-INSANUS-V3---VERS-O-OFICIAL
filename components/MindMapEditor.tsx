@@ -44,11 +44,16 @@ interface VisualNodeRendererProps {
     isRoot?: boolean;
     // New prop to delete a comment (passed from parent if allowed)
     onDeleteComment?: (nodeId: string, commentId: string) => void;
+    // New prop to edit a comment
+    onEditComment?: (nodeId: string, comment: MindMapComment) => void;
+    // Drag and Drop Props
+    onMoveNode?: (sourceId: string, targetId: string) => void;
 }
 
-export const VisualNodeRenderer: React.FC<VisualNodeRendererProps> = ({ node, selectedId, onSelect, depth = 0, isRoot = false, onDeleteComment }) => {
+export const VisualNodeRenderer: React.FC<VisualNodeRendererProps> = ({ node, selectedId, onSelect, depth = 0, isRoot = false, onDeleteComment, onEditComment, onMoveNode }) => {
     const [showComments, setShowComments] = useState(false);
     const [expanded, setExpanded] = useState(true); // Default expanded in editor
+    const [isDragOver, setIsDragOver] = useState(false); // Visual feedback for drop target
     const hasChildren = node.children && node.children.length > 0;
     const isSelected = selectedId === node.id;
     const hasComments = node.comments && node.comments.length > 0;
@@ -90,16 +95,54 @@ export const VisualNodeRenderer: React.FC<VisualNodeRendererProps> = ({ node, se
         maxWidth: 'none', // Allow scaling up
     } : {};
 
+    // --- DRAG AND DROP HANDLERS ---
+    const handleDragStart = (e: React.DragEvent) => {
+        if (isRoot) {
+            e.preventDefault(); // Cannot drag root
+            return;
+        }
+        e.dataTransfer.setData('nodeId', node.id);
+        e.stopPropagation();
+    };
+
+    const handleDragOver = (e: React.DragEvent) => {
+        e.preventDefault(); // Allow drop
+        e.stopPropagation();
+        if (!isDragOver) setIsDragOver(true);
+    };
+
+    const handleDragLeave = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragOver(false);
+    };
+
+    const handleDrop = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragOver(false);
+        const sourceId = e.dataTransfer.getData('nodeId');
+        if (sourceId && sourceId !== node.id && onMoveNode) {
+            onMoveNode(sourceId, node.id);
+        }
+    };
+
     return (
         <div className="flex items-center">
             <div className="flex flex-col items-center relative z-10 group">
                 <div 
+                    draggable={!isRoot && !!onMoveNode}
+                    onDragStart={handleDragStart}
+                    onDragOver={onMoveNode ? handleDragOver : undefined}
+                    onDragLeave={onMoveNode ? handleDragLeave : undefined}
+                    onDrop={onMoveNode ? handleDrop : undefined}
                     onClick={(e) => { e.stopPropagation(); onSelect(node.id); }}
                     style={customStyle}
                     className={`
                         relative px-6 py-3 rounded-2xl border-2 transition-all cursor-pointer transform duration-200
                         ${colorClass}
                         ${isSelected && !isCustom ? 'ring-4 ring-white scale-105 z-20 brightness-110 shadow-xl' : 'hover:scale-105 hover:brightness-110'}
+                        ${isDragOver ? '!bg-white/20 !border-white scale-110 shadow-[0_0_30px_white]' : ''}
                         min-w-[120px] max-w-[300px] text-center backdrop-blur-md select-none flex items-center justify-center
                     `}
                 >
@@ -147,27 +190,75 @@ export const VisualNodeRenderer: React.FC<VisualNodeRendererProps> = ({ node, se
                     )}
                 </div>
 
-                {/* Expanded Post-Its */}
-                {showComments && hasComments && (
-                    <div className="absolute top-full mt-2 flex flex-col gap-2 z-50 animate-fade-in w-64 items-center">
-                        {node.comments!.map(comment => (
-                            <div 
-                                key={comment.id} 
-                                className="p-3 rounded shadow-lg text-black text-xs relative w-full text-left font-medium border border-black/10"
-                                style={{ backgroundColor: comment.backgroundColor }}
-                            >
-                                <div dangerouslySetInnerHTML={{ __html: comment.content }} className="rich-text-content"/>
-                                {onDeleteComment && (
-                                    <button 
-                                        onClick={(e) => { e.stopPropagation(); onDeleteComment(node.id, comment.id); }}
-                                        className="absolute top-1 right-1 text-black/40 hover:text-red-600 transition p-1"
-                                    >
-                                        <Icon.Trash className="w-3 h-3"/>
-                                    </button>
-                                )}
-                            </div>
-                        ))}
-                    </div>
+                {/* Expanded Post-Its (PORTAL) */}
+                {showComments && hasComments && createPortal(
+                    <div 
+                        className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fade-in p-4 cursor-default"
+                        onClick={(e) => { 
+                            e.preventDefault(); 
+                            e.stopPropagation(); 
+                            setShowComments(false); 
+                        }}
+                    >
+                        <div 
+                            className="flex flex-wrap gap-6 justify-center items-center max-w-7xl max-h-[90vh] overflow-y-auto custom-scrollbar p-10"
+                            onClick={(e) => e.stopPropagation()} 
+                        >
+                            {node.comments!.map((comment, idx) => (
+                                <div 
+                                    key={comment.id} 
+                                    className="p-6 rounded-lg shadow-2xl text-black text-sm relative w-80 min-h-[220px] flex flex-col font-medium border border-black/10 transition-transform hover:scale-105 hover:z-50 duration-300"
+                                    style={{ 
+                                        backgroundColor: comment.backgroundColor, 
+                                        transform: `rotate(${idx % 2 === 0 ? '-2deg' : '2deg'})`
+                                    }}
+                                >
+                                    {/* Tape effect */}
+                                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-20 h-6 bg-white/30 backdrop-blur-sm -rotate-1 border border-white/20 shadow-sm opacity-60"></div>
+                                    
+                                    <div className="flex-1 overflow-y-auto custom-scrollbar mb-2 pr-1">
+                                        <div dangerouslySetInnerHTML={{ __html: comment.content }} className="rich-text-content prose prose-sm max-w-none leading-relaxed text-black/90 font-serif"/>
+                                    </div>
+                                    
+                                    <div className="mt-auto pt-3 border-t border-black/10 flex justify-between items-center">
+                                        <span className="text-[10px] text-black/50 font-mono font-bold uppercase">{new Date(comment.createdAt).toLocaleDateString()}</span>
+                                        <div className="flex gap-1">
+                                            {onEditComment && (
+                                                <button 
+                                                    onClick={(e) => { 
+                                                        e.stopPropagation(); 
+                                                        setShowComments(false);
+                                                        onEditComment(node.id, comment);
+                                                    }}
+                                                    className="text-black/40 hover:text-blue-600 transition p-1.5 hover:bg-black/5 rounded-full"
+                                                    title="Editar Post-it"
+                                                >
+                                                    <Icon.Edit className="w-4 h-4"/>
+                                                </button>
+                                            )}
+                                            {onDeleteComment && (
+                                                <button 
+                                                    onClick={(e) => { 
+                                                        e.stopPropagation(); 
+                                                        setShowComments(false);
+                                                        onDeleteComment(node.id, comment.id); 
+                                                    }}
+                                                    className="text-black/40 hover:text-red-600 transition p-1.5 hover:bg-black/5 rounded-full"
+                                                    title="Excluir Post-it"
+                                                >
+                                                    <Icon.Trash className="w-4 h-4"/>
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 text-white/50 text-[10px] font-bold uppercase tracking-widest pointer-events-none bg-black/50 px-4 py-2 rounded-full backdrop-blur-md">
+                            Clique fora para fechar
+                        </div>
+                    </div>,
+                    document.body
                 )}
             </div>
 
@@ -196,6 +287,8 @@ export const VisualNodeRenderer: React.FC<VisualNodeRendererProps> = ({ node, se
                                     selectedId={selectedId} 
                                     onSelect={onSelect} 
                                     onDeleteComment={onDeleteComment}
+                                    onEditComment={onEditComment}
+                                    onMoveNode={onMoveNode}
                                 />
                             </div>
                         ))}
@@ -210,12 +303,21 @@ export const VisualNodeRenderer: React.FC<VisualNodeRendererProps> = ({ node, se
 interface PostItModalProps {
     onSave: (content: string, color: string) => void;
     onClose: () => void;
+    initialContent?: string;
+    initialColor?: string;
 }
 
-const PostItModal: React.FC<PostItModalProps> = ({ onSave, onClose }) => {
-    const [content, setContent] = useState('');
-    const [bgColor, setBgColor] = useState(POSTIT_COLORS[0].hex);
+const PostItModal: React.FC<PostItModalProps> = ({ onSave, onClose, initialContent = '', initialColor }) => {
+    const [content, setContent] = useState(initialContent);
+    const [bgColor, setBgColor] = useState(initialColor || POSTIT_COLORS[0].hex);
     const editorRef = useRef<HTMLDivElement>(null);
+
+    // Initial content setup for contentEditable
+    useEffect(() => {
+        if (editorRef.current && initialContent) {
+            editorRef.current.innerHTML = initialContent;
+        }
+    }, [initialContent]);
 
     const execCmd = (command: string, value: string | undefined = undefined) => {
         const editor = editorRef.current;
@@ -278,7 +380,7 @@ const PostItModal: React.FC<PostItModalProps> = ({ onSave, onClose }) => {
                 </div>
 
                 <button onClick={handleSave} className="w-full py-3 bg-insanus-red hover:bg-red-600 text-white rounded-xl font-bold text-xs uppercase shadow-neon transition">
-                    Adicionar Comentário
+                    Salvar Comentário
                 </button>
             </div>
         </div>
@@ -306,6 +408,11 @@ export const VisualMindMapModal: React.FC<VisualMindMapModalProps> = ({ rootNode
     
     // Post-It State
     const [showPostItModal, setShowPostItModal] = useState(false);
+    const [editingComment, setEditingComment] = useState<{ nodeId: string, comment: MindMapComment } | null>(null);
+    const [commentToDelete, setCommentToDelete] = useState<{ nodeId: string, commentId: string } | null>(null);
+    
+    // --- NEW: DELETE MODAL STATE ---
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     
     // Refs
     const containerRef = useRef<HTMLDivElement>(null);
@@ -348,27 +455,101 @@ export const VisualMindMapModal: React.FC<VisualMindMapModalProps> = ({ rootNode
         return root;
     };
 
-    const addCommentToNode = (content: string, color: string) => {
-        if (!selectedNodeId) return;
-        const newNode = findNode(tree, selectedNodeId);
-        if (newNode) {
-            const newComment: MindMapComment = {
-                id: uuid(),
-                content,
-                backgroundColor: color,
-                createdAt: new Date().toISOString()
-            };
-            const updatedComments = [...(newNode.comments || []), newComment];
-            setTree(prev => updateNode(prev, selectedNodeId, { comments: updatedComments }));
-            setShowPostItModal(false);
-        }
+    // Helper to check if child is a descendant of parent (Cycle check)
+    const isDescendant = (root: MindMapNode, parentId: string, childId: string): boolean => {
+        if (parentId === childId) return true;
+        const parent = findNode(root, parentId);
+        if (!parent) return false;
+        
+        const check = (node: MindMapNode): boolean => {
+            if (node.id === childId) return true;
+            if (node.children) {
+                return node.children.some(c => check(c));
+            }
+            return false;
+        };
+        
+        return check(parent);
     };
 
-    const handleDeleteComment = (nodeId: string, commentId: string) => {
-        const node = findNode(tree, nodeId);
-        if (node && node.comments) {
-            const updatedComments = node.comments.filter(c => c.id !== commentId);
-            setTree(prev => updateNode(prev, nodeId, { comments: updatedComments }));
+    // Helper to attach an existing node object to a new parent
+    const attachNode = (root: MindMapNode, parentId: string, nodeToAttach: MindMapNode): MindMapNode => {
+        if (root.id === parentId) {
+            return { ...root, children: [...(root.children || []), nodeToAttach] };
+        }
+        if (root.children) {
+            return { ...root, children: root.children.map(c => attachNode(c, parentId, nodeToAttach)) };
+        }
+        return root;
+    };
+
+    // Helper to reorder nodes
+    const reorderNodeInTree = (root: MindMapNode, nodeId: string, direction: 'up' | 'down'): MindMapNode => {
+        if (root.children) {
+            const idx = root.children.findIndex(c => c.id === nodeId);
+            if (idx !== -1) {
+                const newChildren = [...root.children];
+                const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+                if (targetIdx >= 0 && targetIdx < newChildren.length) {
+                    [newChildren[idx], newChildren[targetIdx]] = [newChildren[targetIdx], newChildren[idx]];
+                    return { ...root, children: newChildren };
+                }
+                return root; // Boundary reached
+            }
+            return { ...root, children: root.children.map(c => reorderNodeInTree(c, nodeId, direction)) };
+        }
+        return root;
+    };
+
+    // --- COMMENT HANDLERS ---
+
+    const handleSaveComment = (content: string, color: string) => {
+        if (editingComment) {
+            // EDITING EXISTING COMMENT
+            const { nodeId, comment } = editingComment;
+            const node = findNode(tree, nodeId);
+            if (node && node.comments) {
+                const updatedComments = node.comments.map(c => 
+                    c.id === comment.id ? { ...c, content, backgroundColor: color } : c
+                );
+                setTree(prev => updateNode(prev, nodeId, { comments: updatedComments }));
+            }
+            setEditingComment(null);
+        } else if (selectedNodeId) {
+            // CREATING NEW COMMENT
+            const node = findNode(tree, selectedNodeId);
+            if (node) {
+                const newComment: MindMapComment = {
+                    id: uuid(),
+                    content,
+                    backgroundColor: color,
+                    createdAt: new Date().toISOString()
+                };
+                const updatedComments = [...(node.comments || []), newComment];
+                setTree(prev => updateNode(prev, selectedNodeId, { comments: updatedComments }));
+            }
+        }
+        setShowPostItModal(false);
+    };
+
+    const handleEditComment = (nodeId: string, comment: MindMapComment) => {
+        setEditingComment({ nodeId, comment });
+        setShowPostItModal(true);
+    };
+
+    const initiateDeleteComment = (nodeId: string, commentId: string) => {
+        setCommentToDelete({ nodeId, commentId });
+    };
+
+    const executeDeleteComment = () => {
+        if (commentToDelete) {
+            const { nodeId, commentId } = commentToDelete;
+            const node = findNode(tree, nodeId);
+            if (node && node.comments) {
+                const updatedComments = node.comments.filter(c => c.id !== commentId);
+                setTree(prev => updateNode(prev, nodeId, { comments: updatedComments }));
+            }
+            setCommentToDelete(null);
         }
     };
 
@@ -412,6 +593,44 @@ export const VisualMindMapModal: React.FC<VisualMindMapModalProps> = ({ rootNode
         savedRange.current = null;
         setSelectedNodeId(id);
         setShowEmojiPicker(false);
+    };
+
+    // --- REORDER & MOVE HANDLERS ---
+    
+    const handleReorder = (direction: 'up' | 'down') => {
+        if (!selectedNodeId || selectedNodeId === tree.id) return;
+        setTree(prev => reorderNodeInTree(prev, selectedNodeId, direction));
+    };
+
+    const handleMoveNode = (sourceId: string, targetId: string) => {
+        if (sourceId === tree.id) {
+            alert("Não é possível mover o nó raiz.");
+            return;
+        }
+        if (sourceId === targetId) return; // Same node
+
+        // Prevent Cycle: Check if target is inside source
+        // Is 'targetId' a descendant of 'sourceId'?
+        // We can reuse findNode on the 'sourceNode' (if we had it extracted) or generic check.
+        // Actually, simple check:
+        // Find source node in current tree
+        const sourceNode = findNode(tree, sourceId);
+        if (!sourceNode) return;
+
+        // Check if target is a descendant of source (which would create a cycle)
+        if (findNode(sourceNode, targetId)) {
+            alert("Não é possível mover um tópico para dentro de si mesmo.");
+            return;
+        }
+
+        // Execution:
+        // 1. Delete from old location (returning new tree without source)
+        const treeWithoutSource = deleteNode(tree, sourceId);
+        if (!treeWithoutSource) return; // Should not happen as we checked root
+
+        // 2. Attach sourceNode to targetId in the new tree
+        const finalTree = attachNode(treeWithoutSource, targetId, sourceNode);
+        setTree(finalTree);
     };
 
     // --- ROBUST EDITOR LOGIC ---
@@ -482,14 +701,35 @@ export const VisualMindMapModal: React.FC<VisualMindMapModalProps> = ({ rootNode
     const handleColorChange = (colorVal: string) => { if (selectedNodeId) setTree(prev => updateNode(prev, selectedNodeId, { color: colorVal })); };
     const handleAddChild = () => { if (selectedNodeId) setTree(prev => addChild(prev, selectedNodeId)); };
     
-    const handleDelete = () => {
+    // --- FIX: SAFE DELETE HANDLERS WITH CUSTOM MODAL ---
+    
+    // 1. Triggered by Button: Opens the Custom Modal
+    const handleDelete = (e: React.MouseEvent) => {
+        e.preventDefault(); 
+        e.stopPropagation(); 
+
+        const targetId = selectedNodeId; 
+        if (!targetId) return;
+
+        if (targetId === tree.id) {
+            alert("Não é possível excluir o nó raiz.");
+            return;
+        }
+        
+        // Show the custom modal instead of window.confirm
+        setShowDeleteConfirm(true);
+    };
+
+    // 2. Executed by Modal Confirm Button
+    const executeDelete = () => {
         if (selectedNodeId) {
-            if (selectedNodeId === tree.id) return alert("Não é possível excluir o nó raiz.");
-            if (confirm("Excluir este tópico e seus filhos?")) {
-                const newTree = deleteNode(tree, selectedNodeId);
-                if (newTree) { setTree(newTree); setSelectedNodeId(null); }
+            const newTree = deleteNode(tree, selectedNodeId);
+            if (newTree) { 
+                setTree(newTree); 
+                setSelectedNodeId(null); 
             }
         }
+        setShowDeleteConfirm(false);
     };
 
     const handleWheel = (e: React.WheelEvent) => {
@@ -538,9 +778,75 @@ export const VisualMindMapModal: React.FC<VisualMindMapModalProps> = ({ rootNode
         <div className="fixed inset-0 z-[9999] bg-[#050505] flex flex-col animate-fade-in overflow-hidden select-none">
             {showPostItModal && (
                 <PostItModal 
-                    onSave={addCommentToNode} 
-                    onClose={() => setShowPostItModal(false)} 
+                    onSave={handleSaveComment} 
+                    onClose={() => { setShowPostItModal(false); setEditingComment(null); }} 
+                    initialContent={editingComment?.comment.content}
+                    initialColor={editingComment?.comment.backgroundColor}
                 />
+            )}
+
+            {/* DELETE CONFIRMATION POPUP (TOPIC) */}
+            {showDeleteConfirm && (
+                <div 
+                    className="fixed inset-0 z-[100001] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in"
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <div className="bg-[#1A1A1A] border border-red-500/30 p-6 rounded-2xl shadow-2xl max-w-sm w-full relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-full h-1 bg-red-600"></div>
+                        <h3 className="text-lg font-bold text-white mb-3 uppercase flex items-center gap-2">
+                            <Icon.Trash className="w-5 h-5 text-red-500"/> Excluir Tópico?
+                        </h3>
+                        <p className="text-gray-400 text-xs mb-6 leading-relaxed">
+                            Você está prestes a excluir este tópico e <strong>todas as suas ramificações</strong>. <br/>Esta ação é irreversível.
+                        </p>
+                        <div className="flex gap-3">
+                            <button 
+                                onClick={() => setShowDeleteConfirm(false)}
+                                className="flex-1 bg-transparent border border-white/10 hover:bg-white/5 text-gray-300 py-3 rounded-xl font-bold text-[10px] uppercase transition"
+                            >
+                                Cancelar
+                            </button>
+                            <button 
+                                onClick={executeDelete}
+                                className="flex-1 bg-red-600 hover:bg-red-700 text-white py-3 rounded-xl font-bold text-[10px] uppercase shadow-neon transition"
+                            >
+                                Confirmar Exclusão
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* DELETE CONFIRMATION POPUP (COMMENT/POST-IT) */}
+            {commentToDelete && (
+                <div 
+                    className="fixed inset-0 z-[100001] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in"
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <div className="bg-[#1A1A1A] border border-red-500/30 p-6 rounded-2xl shadow-2xl max-w-sm w-full relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-full h-1 bg-red-600"></div>
+                        <h3 className="text-lg font-bold text-white mb-3 uppercase flex items-center gap-2">
+                            <Icon.Trash className="w-5 h-5 text-red-500"/> Excluir Anotação?
+                        </h3>
+                        <p className="text-gray-400 text-xs mb-6 leading-relaxed">
+                            Deseja realmente remover este Post-it? <br/>Esta ação é irreversível.
+                        </p>
+                        <div className="flex gap-3">
+                            <button 
+                                onClick={() => setCommentToDelete(null)}
+                                className="flex-1 bg-transparent border border-white/10 hover:bg-white/5 text-gray-300 py-3 rounded-xl font-bold text-[10px] uppercase transition"
+                            >
+                                Cancelar
+                            </button>
+                            <button 
+                                onClick={executeDeleteComment}
+                                className="flex-1 bg-red-600 hover:bg-red-700 text-white py-3 rounded-xl font-bold text-[10px] uppercase shadow-neon transition"
+                            >
+                                Excluir
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
 
             {title && (
@@ -564,7 +870,14 @@ export const VisualMindMapModal: React.FC<VisualMindMapModalProps> = ({ rootNode
                         {/* Header */}
                         <div className="flex justify-between items-center border-b border-white/10 pb-2">
                             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Editar Tópico</span>
-                            <button onClick={() => setSelectedNodeId(null)} className="text-gray-500 hover:text-white"><Icon.ChevronDown className="w-4 h-4"/></button>
+                            <div className="flex items-center gap-2">
+                                <div className="flex items-center bg-white/5 rounded border border-white/5">
+                                    <button onClick={() => handleReorder('up')} className="p-1 text-gray-400 hover:text-white transition" title="Mover para Cima"><Icon.ArrowUp className="w-4 h-4"/></button>
+                                    <div className="w-px h-4 bg-white/10"></div>
+                                    <button onClick={() => handleReorder('down')} className="p-1 text-gray-400 hover:text-white transition" title="Mover para Baixo"><Icon.ArrowDown className="w-4 h-4"/></button>
+                                </div>
+                                <button onClick={() => setSelectedNodeId(null)} className="text-gray-500 hover:text-white ml-2"><Icon.ChevronDown className="w-4 h-4"/></button>
+                            </div>
                         </div>
 
                         {/* Rich Text Toolbar */}
@@ -785,7 +1098,9 @@ export const VisualMindMapModal: React.FC<VisualMindMapModalProps> = ({ rootNode
                         selectedId={selectedNodeId} 
                         onSelect={handleSelect} 
                         isRoot={true} 
-                        onDeleteComment={handleDeleteComment}
+                        onDeleteComment={initiateDeleteComment}
+                        onEditComment={handleEditComment}
+                        onMoveNode={handleMoveNode}
                     />
                 </div>
             </div>
